@@ -34,9 +34,9 @@ class PerformPair(object):
     perform_notes.sort(key=lambda note: note.start)
 
     for pair in match_pairs:
-      if pair.perform_second:
+      if pair.perform_second is not None:
         cand_idx = utils.find_le_idx([el.start for el in perform_notes], pair.perform_second - 0.01)
-        if not cand_idx:
+        if cand_idx is None:
           cand_idx = 0
         for n in range(cand_idx, len(perform_notes)):
           cand_note = perform_notes[n]
@@ -49,12 +49,17 @@ class PerformPair(object):
           print(cand_idx)
           raise RuntimeError('No matching perform_second: {:.4f}, perform note: {}'.format(perform_notes[cand_idx].start, pair.__dict__))
       if pair.score_id:
+        if pair.midi_note is None:
+          print(cand_idx)
+          raise RuntimeError('No matching perform_second: {:.4f}, perform note: {}'.format(perform_notes[cand_idx].start, pair.__dict__))
+      if pair.score_id is not None:
         score_info = score_maps[pair.score_id]
         pair.score_pitch = score_info[0]
         pair.score_second = score_info[1]
         cand_idx = utils.find_le_idx([el.note_duration.time_position for el in xml_sequence.notes],
                                      pair.score_second - 0.01)
-        if not cand_idx:
+
+        if cand_idx is None:
           cand_idx = 0
         for n in range(cand_idx, len(xml_sequence.notes)):
           cand_note = xml_sequence.notes[n]
@@ -63,23 +68,22 @@ class PerformPair(object):
           if cand_note.pitch[1] == pair.score_pitch:
             pair.score_note = cand_note
             break
-        if not pair.score_note:
-          raise RuntimeError('No matching score note: {}'.format(pair.__dict__))
-      self.pairs.append(pair)
 
-      self.sort_pairs()
+        if pair.score_note is None:
+          raise RuntimeError('No matching score note: {}'.format(pair.__dict__))
+      if pair.score_note is not None:
+        self.score_pairs.append(pair)
+      else:
+        self.extra_pairs.append(pair)
+
+    self.sort_pairs()
+    self.pairs = self.score_pairs + self.extra_pairs
 
   def sort_pairs(self):
-    self.score_pairs = [el for el in self.pairs if el.score_note is not None]
-    self.extra_pairs = [el for el in self.pairs if not el.score_note is not None]
-
     self.score_pairs.sort(key=lambda x: (x.score_note.note_duration.xml_position,
                                          x.score_note.note_duration.grace_order,
                                          -x.score_note.pitch[1]))
     self.extra_pairs.sort(key=lambda x: (x.midi_note.start, -x.midi_note.pitch))
-
-    self.pairs = self.score_pairs + self.extra_pairs
-
 
 class Pair(object):
   def __init__(self):
