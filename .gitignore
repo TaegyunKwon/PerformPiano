@@ -3,3 +3,4 @@ venv/*
 *.mid
 .idea/
 __pycache__/*
+examples/*

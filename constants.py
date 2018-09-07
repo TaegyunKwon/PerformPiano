@@ -153,3 +153,5 @@ TYPE_RATIO_MAP = {'maxima': Fraction(8, 1), 'long': Fraction(4, 1),
                   '32nd': Fraction(1, 32), '64th': Fraction(1, 64),
                   '128th': Fraction(1, 128), '256th': Fraction(1, 256),
                   '512th': Fraction(1, 512), '1024th': Fraction(1, 1024)}
+
+NOTATION = {}

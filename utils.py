@@ -48,3 +48,14 @@ def find_index_list_of_list(element, in_list):
           return in_list.index(li)
 
   return None
+
+
+def direction_words_flatten(note_attribute):
+  flatten_words = note_attribute.absolute
+  if not note_attribute.relative == []:
+    for rel in note_attribute.relative:
+      if rel.type['type'] == 'words':
+        flatten_words = flatten_words + ' ' + rel.type['content']
+      else:
+        flatten_words = flatten_words + ' ' + rel.type['type']
+  return flatten_words
