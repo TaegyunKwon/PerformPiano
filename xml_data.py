@@ -62,15 +62,15 @@ class XmlNoteSequence(object):
       note_position = note.note_duration.xml_position
 
       idx = find_le_idx([el.xml_position for el in abs_dynamics], note_position)
-      if idx:
+      if idx is not None:
         note.dynamic.absolute = abs_dynamics[idx].type['content']
 
       idx = find_le_idx([el.xml_position for el in abs_tempos], note_position)
-      if idx:
+      if idx is not None:
         note.tempo.absolute = abs_tempos[idx].type['content']
 
       idx = find_le_idx([el.xml_position for el in time_signatures], note_position)
-      if idx:
+      if idx is not None:
         note.tempo.time_numerator = time_signatures[idx].numerator
         note.tempo.time_denominator = time_signatures[idx].denominator
 
@@ -177,7 +177,7 @@ class XmlMeta(object):
     cleaned_direction = []
     for i in range(len(directions)):
       direction = directions[i]
-      if direction.type:
+      if direction.type is not None:
         if direction.type['type'] == "none":
           for j in range(i):
             prev_dir = directions[i - j - 1]
@@ -333,14 +333,18 @@ class XmlNotes(object):
       rest_grc = []
       added_grc = []
       sec_to_following = 0
+      # xml_time_to_following = 0
       for (grace_order, grc) in enumerate(reversed(previous_grace_notes)):
         if grc.voice == note.voice:
           note.note_duration.after_grace_note = True
           grc.note_duration.grace_order = -(1 + grace_order)  # start from -1
 
           dur_seconds = duration_ratio(grc) * grc.state.seconds_per_quarter
+          # dur_xml_time = duration_ratio(grc) * (grc.state.divisions / grc.state.time_signature.denominator * 4)
           grc.note_duration.time_position -= sec_to_following + dur_seconds
-          sec_to_following = sec_to_following + dur_seconds
+          # grc.note_duration.xml_position -= xml_time_to_following + dur_xml_time
+          sec_to_following += dur_seconds
+          # xml_time_to_following += dur_xml_time
 
           grc.following_note = note
           added_grc.append(grc)

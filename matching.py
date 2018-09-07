@@ -45,10 +45,6 @@ class PerformPair(object):
           if cand_note.pitch == pair.perform_pitch:
             pair.midi_note = cand_note
             break
-        if not pair.midi_note:
-          print(cand_idx)
-          raise RuntimeError('No matching perform_second: {:.4f}, perform note: {}'.format(perform_notes[cand_idx].start, pair.__dict__))
-      if pair.score_id:
         if pair.midi_note is None:
           print(cand_idx)
           raise RuntimeError('No matching perform_second: {:.4f}, perform note: {}'.format(perform_notes[cand_idx].start, pair.__dict__))
@@ -70,7 +66,9 @@ class PerformPair(object):
             break
 
         if pair.score_note is None:
-          raise RuntimeError('No matching score note: {}'.format(pair.__dict__))
+          print(cand_idx)
+          raise RuntimeError('No matching score_second: {:.4f}, perform note: {}'.
+                             format(xml_sequence.notes[cand_idx].note_duration.time_position, pair.__dict__))
       if pair.score_note is not None:
         self.score_pairs.append(pair)
       else:
@@ -84,6 +82,7 @@ class PerformPair(object):
                                          x.score_note.note_duration.grace_order,
                                          -x.score_note.pitch[1]))
     self.extra_pairs.sort(key=lambda x: (x.midi_note.start, -x.midi_note.pitch))
+
 
 class Pair(object):
   def __init__(self):
