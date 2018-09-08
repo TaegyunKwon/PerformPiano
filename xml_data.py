@@ -361,16 +361,16 @@ class XmlNotes(object):
     notes = []
     previous_grace_notes = []
     rests = []
-    beat_position = 0
+    measure_beat_position = 0
     for measure in parts.measures:
-      measure.beat_position = beat_position
+      measure.beat_position = measure_beat_position
       measure_start = measure.start_xml_position
       time_sig = measure.state.time_signature
       beat_length = (time_sig.state.divisions / time_sig.denominator * 4)
       for note in measure.notes:
         note.length_in_beat = note.note_duration.duration / beat_length
-        beat_location = (note.note_duration.xml_position - measure_start) / beat_length
-        note.beat_position = beat_position + beat_location
+        note.beat_location = (note.note_duration.xml_position - measure_start) / beat_length
+        note.beat_position = measure_beat_position + note.beat_location
         if note.note_duration.is_grace_note:
           previous_grace_notes.append(note)
           notes.append(note)
@@ -385,7 +385,7 @@ class XmlNotes(object):
           if note.is_print_object:
             rests.append(note)
 
-      beat_position += measure.duration / beat_length
+      measure_beat_position += measure.duration / beat_length
     return notes, rests
 
   def mark_after_grace_note_to_chord_notes(self):

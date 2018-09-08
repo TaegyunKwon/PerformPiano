@@ -24,8 +24,8 @@ class NoteFeatures(object):
     self.perform_features = dict()
 
     self.pitch = self.score_note.pitch
-    self.note_length = None
-    self.beat_location = None
+    self.note_length = self.score_note.length_in_beat
+    self.beat_location = self.score_note.beat_location
     self.score_ioi = None
     self.notation = self.notation_to_category()
     self.dynamic = self.dynamics_to_category()
@@ -60,10 +60,29 @@ class ScoreFeatures(object):
     self.time_signatures = self.xml_sequence.meta.time_signatures
     self.note_features = [NoteFeatures(el.score_note, el.midi_note) for el in score_pairs]
     self.note_groups = []
-    self.add_beat_info()
+    # self.deprecated_add_beat_info()
     self.add_ioi_info()
 
-  def add_beat_info(self):
+  def add_ioi_info(self):
+    concurrent_notes = []
+    last_position = self.note_features[0].score_note.beat_position
+    for n in range(len(self.note_features)):
+      current_feature = self.note_features[n]
+      current_position = current_feature.score_note.beat_position
+      if last_position == current_position:
+        concurrent_notes.append(self.note_features[n])
+      else:
+        for note in concurrent_notes:
+          note.score_ioi = current_position - last_position
+        last_position = current_position
+        concurrent_notes = [current_feature]
+
+    # handle last concurrent_notes
+    self.note_groups.append(concurrent_notes)
+    for note in concurrent_notes:
+      note.score_ioi = np.inf
+
+  def deprecated_add_beat_info(self):
     for note_feature in self.note_features:
       measure_number = note_feature.score_note.measure_number
       measure_start = self.measure_positions[measure_number]
@@ -73,7 +92,7 @@ class ScoreFeatures(object):
       note_feature.note_length = note_feature.score_note.note_duration.duration / beat_length
       note_feature.beat_location = (note_feature.score_note.note_duration.xml_position - measure_start) / beat_length
 
-  def add_ioi_info(self):
+  def deprecated_add_ioi_info(self):
     concurrent_notes = []
     last_position = self.note_features[0].score_note.note_duration.xml_position
     for n in range(len(self.note_features)):
