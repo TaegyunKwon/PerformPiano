@@ -287,7 +287,9 @@ class XmlMeta(object):
                       "\nabsolute_dynamics_position: {}".format(absolute_dynamics_position) +
                       "\nrel_dynamic: {}".format(rel.__dict__), RuntimeWarning)
         rel.previous_dynamic = None
-      rel.previous_dynamic = absolute_dynamics[index].type['content']
+        index = 0
+      else:
+        rel.previous_dynamic = absolute_dynamics[index].type['content']
       if rel.type['type'] == 'dynamic':  # sf, fz, sfz
         rel.end_xml_position = rel.xml_position
       if index + 1 < len(absolute_dynamics):
@@ -359,8 +361,16 @@ class XmlNotes(object):
     notes = []
     previous_grace_notes = []
     rests = []
+    beat_position = 0
     for measure in parts.measures:
+      measure.beat_position = beat_position
+      measure_start = measure.start_xml_position
+      time_sig = measure.state.time_signature
+      beat_length = (time_sig.state.divisions / time_sig.denominator * 4)
       for note in measure.notes:
+        note.length_in_beat = note.note_duration.duration / beat_length
+        beat_location = (note.note_duration.xml_position - measure_start) / beat_length
+        note.beat_position = beat_position + beat_location
         if note.note_duration.is_grace_note:
           previous_grace_notes.append(note)
           notes.append(note)
@@ -374,6 +384,8 @@ class XmlNotes(object):
           assert note.is_rest
           if note.is_print_object:
             rests.append(note)
+
+      beat_position += measure.duration / beat_length
     return notes, rests
 
   def mark_after_grace_note_to_chord_notes(self):
@@ -396,6 +408,7 @@ class XmlNotes(object):
             removed_forward[j].note_duration.seconds += current_note.note_duration.seconds
             removed_forward[j].note_duration.duration += current_note.note_duration.duration
             removed_forward[j].note_duration.midi_ticks += current_note.note_duration.midi_ticks
+            removed_forward[j].length_in_beat += current_note.length_in_beat
             break
           if j == 0:
             warnings.warn("Any note found to match tied_stop. note: {:d}".format(i), RuntimeWarning)

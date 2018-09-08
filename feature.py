@@ -59,6 +59,7 @@ class ScoreFeatures(object):
     self.measure_positions = [el.start_xml_position for el in self.xml_sequence.xml_doc.parts[0].measures]
     self.time_signatures = self.xml_sequence.meta.time_signatures
     self.note_features = [NoteFeatures(el.score_note, el.midi_note) for el in score_pairs]
+    self.note_groups = []
     self.add_beat_info()
     self.add_ioi_info()
 
@@ -93,15 +94,19 @@ class ScoreFeatures(object):
                               (current_feature.score_note.measure_number - last_feature.score_note.measure_number)
                               + current_feature.beat_location
                               - last_feature.beat_location)
+        self.note_groups.append(concurrent_notes)
         concurrent_notes = [current_feature]
 
-
+    # handle last concurrent_notes
+    self.note_groups.append(concurrent_notes)
+    for note in concurrent_notes:
+      note.score_ioi = np.inf
 
 
 '''
 class Features(ScoreFeatures):
-  def __init__(self, xml_sequence, pairs):
-    super(Features, self).__init__(xml_sequence, pairs)
+  def __init__(self, xml_sequence, score_pairs):
+    super(Features, self).__init__(xml_sequence, score_pairs)
 
 
   def beat_level_tempo(self):
