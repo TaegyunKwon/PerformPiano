@@ -7,6 +7,8 @@ import utils
 import numpy as np
 from musicXML_parser.mxp.notations import Notations
 import constants
+import warnings
+import itertools
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
@@ -122,20 +124,83 @@ class ScoreFeatures(object):
       note.score_ioi = np.inf
 
 
-'''
 class Features(ScoreFeatures):
   def __init__(self, xml_sequence, score_pairs):
     super(Features, self).__init__(xml_sequence, score_pairs)
+    self.duration = None
+    self.moving_dynamics = None
+    self.moving_tempo = None
+    self.global_tempo = None
 
+    self.calculate_base_tempo()
+    self.calculate_tempo()
+    # self.calculate_dynamics()
 
-  def beat_level_tempo(self):
-    on_beat_pairs = [el for el in self.pairs.score_pairs if abs(el.beat_loc % 1) <= 0.1]
-    tempos = []
-    for n in range(len(on_beat_pairs)):
-      for m in range(n, len(on_beat_pairs)):
-        if on_beat_pairs[n].
-    pass
-'''
+  def calculate_base_tempo(self):
+    # calculate mean tempo per abs_tempo region
+    abs_tempos = self.xml_sequence.meta.abs_tempos
+    tempo_region = [el.xml_position for el in abs_tempos]
+    if tempo_region[0] != 0:
+      tempo_region.insert(0, 0)
+
+    nth_tempo = 0
+    note_start = None
+    note_end = None
+    note_in_region = []
+    for n in range(len(self.note_features)):
+      note_feature = self.note_features[n]
+      if tempo_region[nth_tempo] <= note_feature.score_note.note_duration.xml_position\
+          or n == len(self.note_features) - 1:
+        nth_tempo += 1
+        for note in note_in_region:
+          if note.perform_note:
+            note_start = note
+            break
+        for note in reversed(note_in_region):
+          if note.perform_note:
+            if note.perform_note:
+              note_end = note
+              break
+        if note_start is None or note_end is None:
+          warnings.warn('no perform match in tempo area')
+        else:
+          beat_interval = note_end.score_note.beat_position - note_start.score_note.beat_position
+          if beat_interval != 0:
+            base_tempo = 60 * beat_interval / (note_end.perform_note.start - note_start.perform_note.start)
+          else:
+            warnings.warn('no proper perform match (only same beat) in tempo area')
+        for note in note_in_region:
+          note.perform_features['base_tempo'] = base_tempo
+          note_in_region = [note_feature]
+      else:
+        note_in_region.append(note_feature)
+
+  def calculate_tempo(self):
+    def _safe_average_tempo(tempos):
+      tempos = [el for el in tempos if 50 < el < 180]
+      if not tempos:
+        return None
+      else:
+        med_tempo = np.median(tempos)
+        tempos = [el for el in tempos if med_tempo*0.8 > el > med_tempo*1.2]
+        return np.mean(tempos)
+
+    for n_group in range(len(self.note_groups)-1):
+      current_group = self.note_groups[n_group]
+      next_group = self.note_groups[n_group + 1]
+      beat_interval = next_group[0].score_note.beat_position - current_group[0].score_note.beat_position
+      current_time = [el.perform_note.start for el in current_group if el.perform_note is not None]
+      next_time = [el.perform_note.start for el in next_group if el.perform_note is not None]
+
+      if current_time and next_time:
+        time_diffs = list(itertools.product(current_time, next_time))
+        tempo = _safe_average_tempo([60 * beat_interval / (el[1] - el[0]) for el in time_diffs])
+        for note in current_group:
+          note.perform_features['local_tempo'] = tempo
+      else:
+        for note in current_group:
+          note.perform_features['local_tempo'] = None
+
 
 def dynamic_embedding(dynamic_word, embed_table, len_vec=4):
   dynamic_vector = [0] * len_vec
