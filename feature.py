@@ -9,6 +9,7 @@ from musicXML_parser.mxp.notations import Notations
 import constants
 import warnings
 import itertools
+import random
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
@@ -134,6 +135,7 @@ class Features(ScoreFeatures):
 
     self.calculate_base_tempo()
     self.calculate_tempo()
+    self.interpolate_tempo()
     # self.calculate_dynamics()
 
   def calculate_base_tempo(self):
@@ -201,6 +203,75 @@ class Features(ScoreFeatures):
         for note in current_group:
           note.perform_features['local_tempo'] = None
 
+  def interpolate_tempo(self):
+    def _interpolate_groups_in_region(note_groups):
+      # interpolate first/last tempos
+      if note_groups[0].perform_features['local_tempo'] is None:
+        for n in range(len(note_groups)):
+          if note_groups[n][0].perform_features['local_tempo'] is not None:
+            local_tempo = note_groups[n][0].perform_features['local_tempo']
+            for m in range(n - 1):
+              fluctuation = (0.2 * random.random() + 0.9)
+              for note in note_groups[m]:
+                note.perform_features['local_tempo'] = local_tempo * fluctuation
+            break
+
+      elif note_groups[-1][0].perform_features['local_tempo'] is None:
+        for n in reversed(range(len(note_groups))):
+          if note_groups[n][0].perform_features['local_tempo'] is not None:
+            local_tempo = note_groups[n][0].perform_features['local_tempo']
+            for m in range(n + 1, len(note_groups)):
+              fluctuation = (0.2 * random.random() + 0.9)
+              for note in note_groups[m]:
+                note.perform_features['local_tempo'] = local_tempo * fluctuation
+            break
+
+      groups_to_interpolate = []
+      interpolate_start = 0
+      for n in range(len(note_groups)):
+        if note_groups[n][0].perform_features['local_tempo'] is None:
+          groups_to_interpolate.append(note_groups)
+        else:
+          if groups_to_interpolate is not None:
+            interpol_start_group = note_groups[interpolate_start]
+            interpol_end_group = note_groups[n]
+
+            beat_interval = interpol_end_group[0].beat_position - interpol_start_group[0].beat_position
+            for group in groups_to_interpolate:
+              interpol_ratio = (group[0].beat_position - interpol_start_group[0].beat_position) / beat_interval
+              interpol_tempo = interpol_ratio * interpol_end_group[0].perform_features['local_tempo'] + \
+                               (1 - interpol_ratio) * interpol_start_group[0].perform_features['local_tempo']
+              fluctuation = (0.2 * random.random() + 0.9)
+              for note in group:
+                note.perform_features['local_tempo'] = interpol_tempo * fluctuation
+          groups_to_interpolate = []
+          interpolate_start = n
+
+    # group tempo by abs tempo
+    abs_tempos = self.xml_sequence.meta.abs_tempos
+    tempo_region = [el.xml_position for el in abs_tempos]
+    if tempo_region[0] != 0:
+      tempo_region.insert(0, 0)
+    group_xml_positions = [el[0].score_note.note_duration.xml_position for el in self.note_groups]
+    note_groups_index_in_regions = [utils.find_ge_idx(group_xml_positions, el) for el in tempo_region]
+    note_groups_in_regions = []
+    for n in range(len(note_groups_index_in_regions)):
+      if n != len(note_groups_index_in_regions) -1:
+        note_groups_in_regions.append(
+          self.note_groups[note_groups_index_in_regions[n]: note_groups_index_in_regions[n+1]])
+      else:
+        note_groups_in_regions.append(self.note_groups[note_groups_index_in_regions[n]:])
+    for groups in note_groups_in_regions:
+      _interpolate_groups_in_region(groups)
+
+  def add_velocity(self):
+    for note_feature in self.note_features:
+      if note_feature.perform_note is not None:
+        note_feature.perform_features['velocity'] = note_feature.perform_note.velocity
+      else:
+        note_feature.perform_features['velocity'] = None
+
+  
 
 def dynamic_embedding(dynamic_word, embed_table, len_vec=4):
   dynamic_vector = [0] * len_vec

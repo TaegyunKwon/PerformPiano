@@ -1,4 +1,4 @@
-from bisect import bisect_right
+from bisect import bisect_right, bisect_left
 
 
 def find_le_idx(alist, item):
@@ -7,6 +7,13 @@ def find_le_idx(alist, item):
   if i:
     return i-1
   return None
+
+def find_ge_idx(alist, x):
+    'Find leftmost item greater than or equal to x'
+    i = bisect_left(alist, x)
+    if i != len(alist):
+        return i
+    return None
 
 
 def extract_directions_by_keywords(directions, keywords):
