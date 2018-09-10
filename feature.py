@@ -265,13 +265,29 @@ class Features(ScoreFeatures):
       _interpolate_groups_in_region(groups)
 
   def add_velocity(self):
-    for note_feature in self.note_features:
-      if note_feature.perform_note is not None:
-        note_feature.perform_features['velocity'] = note_feature.perform_note.velocity
-      else:
-        note_feature.perform_features['velocity'] = None
+    # TODO: how to interpolate velocity?
+    moving_velocity = np.max([el.perform_note.velocity for el in self.note_groups[0]])
+    last_beat = self.note_groups[0].score_note.beat_poistion
+    for note_group in self.note_groups:
+      current_beat = note_group[0].score_note.beat_position
+      max_velocity = np.max([el.perform_note.velocity for el in note_group])
+      moving_ratio = abs(4 - (current_beat - last_beat))/4
+      moving_velocity = moving_ratio * moving_velocity + (1-moving_ratio)* max_velocity
+      last_beat = current_beat
+      for note in note_group:
+        note.perform_features['moving_velocity'] = moving_velocity
+        if note.perform_note is not None:
+          note.perform_features['velocity'] = note.perform_note.velocity
+        else:
+          note.perform_features['velocity'] = None
 
-  
+  def add_articulation(self):
+    for note_feature in self.note_features:
+      expected_length = 60 * note_feature.note_length / note_feature.perform_features['local_tempo']
+      note_feature.perform_features['articulation'] = \
+        (note_feature.perform_note.end - note_feature.perform_note.start) / expected_length
+
+
 
 def dynamic_embedding(dynamic_word, embed_table, len_vec=4):
   dynamic_vector = [0] * len_vec
@@ -305,6 +321,47 @@ def dynamic_embedding(dynamic_word, embed_table, len_vec=4):
       dynamic_vector[vec_idx] = embed_table.embed_key[index].value
 
   return dynamic_vector
+
+
+def save_feature(features, save_path):
+  """
+  # score_feature
+  0: pitch
+  1: note_length
+  2: beat_location
+  3: score_ioi
+  4~7: dynamic
+  8:11: notation
+  12:14 tempo
+  15: boundary
+  # perform_feature
+  16: base_tempo
+  17: tempo diff
+  18: moving velocity
+  19: velocity diff
+  20: articulation
+  """
+  feature_length = len(features.note_features)
+  feature_array = np.zeros((feature_length, 21))
+
+  for step in range(feature_length):
+    feature_array[step, 0] = features.note_features.pitch
+    feature_array[step, 1] = features.note_features.note_length
+    feature_array[step, 2] = features.note_features.beat_location
+    feature_array[step, 3] = features.note_features.score_ioi
+    feature_array[step, 4:7] = features.note_features.dynamic
+    feature_array[step, 8:11] = features.note_features.notation
+    feature_array[step, 12:14] = features.note_features.tempo
+    # TODO: add boundary
+
+    feature_array[step, 16] = features.note_features.perform_features['base_tempo']
+    feature_array[step, 17] = features.note_features.perform_features['local_tempo'] / features.note_features.perform_features['base_tempo']
+    feature_array[step, 18] = features.note_features.perform_features['moving_velocity']
+    feature_array[step, 19] = features.note_features.perform_features['velocity']
+    feature_array[step, 20] = features.note_features.perform_features['articulation']
+
+  np.save(save_path, feature_array)
+
 
 
 def deviation_tempo(xml_sequence, perform_pair):
