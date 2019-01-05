@@ -5,11 +5,15 @@ from __future__ import division
 import argparse
 import utils
 import numpy as np
-from musicXML_parser.mxp.notations import Notations
 import constants
 import warnings
 import itertools
 import random
+import midi_utils.utils
+import os
+import xml_data
+import matching
+import math
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
@@ -28,6 +32,7 @@ class NoteFeatures(object):
 
     self.pitch = self.score_note.pitch
     self.note_length = self.score_note.length_in_beat
+    self.beat_position = self.score_note.beat_position
     self.beat_location = self.score_note.beat_location
     self.score_ioi = None
     self.notation = self.notation_to_category()
@@ -78,6 +83,7 @@ class ScoreFeatures(object):
         for note in concurrent_notes:
           note.score_ioi = current_position - last_position
         last_position = current_position
+        self.note_groups.append(concurrent_notes)
         concurrent_notes = [current_feature]
 
     # handle last concurrent_notes
@@ -136,14 +142,17 @@ class Features(ScoreFeatures):
     self.calculate_base_tempo()
     self.calculate_tempo()
     self.interpolate_tempo()
+    self.add_velocity()
+    self.add_articulation()
     # self.calculate_dynamics()
 
   def calculate_base_tempo(self):
     # calculate mean tempo per abs_tempo region
-    abs_tempos = self.xml_sequence.meta.abs_tempos
-    tempo_region = [el.xml_position for el in abs_tempos]
-    if tempo_region[0] != 0:
+    abs_tempo = self.xml_sequence.meta.abs_tempo
+    tempo_region = [el.xml_position for el in abs_tempo]
+    if tempo_region[0] != 0 or tempo_region is None:
       tempo_region.insert(0, 0)
+    tempo_region.append(np.inf)
 
     nth_tempo = 0
     note_start = None
@@ -153,7 +162,8 @@ class Features(ScoreFeatures):
       note_feature = self.note_features[n]
       if tempo_region[nth_tempo] <= note_feature.score_note.note_duration.xml_position\
           or n == len(self.note_features) - 1:
-        nth_tempo += 1
+        if n == len(self.note_features) - 1:
+          note_in_region.append(note_feature)
         for note in note_in_region:
           if note.perform_note:
             note_start = note
@@ -164,7 +174,8 @@ class Features(ScoreFeatures):
               note_end = note
               break
         if note_start is None or note_end is None:
-          warnings.warn('no perform match in tempo area')
+          if tempo_region[nth_tempo] != 0:
+            warnings.warn('no perform match in tempo area')
         else:
           beat_interval = note_end.score_note.beat_position - note_start.score_note.beat_position
           if beat_interval != 0:
@@ -173,19 +184,23 @@ class Features(ScoreFeatures):
             warnings.warn('no proper perform match (only same beat) in tempo area')
         for note in note_in_region:
           note.perform_features['base_tempo'] = base_tempo
-          note_in_region = [note_feature]
+        note_in_region = [note_feature]
+        nth_tempo += 1
       else:
         note_in_region.append(note_feature)
 
   def calculate_tempo(self):
     def _safe_average_tempo(tempos):
-      tempos = [el for el in tempos if 50 < el < 180]
+      tempos = [el for el in tempos if 30 < el < 250]
       if not tempos:
         return None
       else:
         med_tempo = np.median(tempos)
-        tempos = [el for el in tempos if med_tempo*0.8 > el > med_tempo*1.2]
-        return np.mean(tempos)
+        tempos = [el for el in tempos if med_tempo*0.8 < el < med_tempo*1.2]
+        if tempos:
+          return np.mean(tempos)
+        else:
+          return None
 
     for n_group in range(len(self.note_groups)-1):
       current_group = self.note_groups[n_group]
@@ -197,18 +212,29 @@ class Features(ScoreFeatures):
       if current_time and next_time:
         time_diffs = list(itertools.product(current_time, next_time))
         tempo = _safe_average_tempo([60 * beat_interval / (el[1] - el[0]) for el in time_diffs])
-        for note in current_group:
-          note.perform_features['local_tempo'] = tempo
+
+        if tempo is not None:
+          for note in current_group:
+            note.perform_features['local_tempo'] = tempo
+            if math.isnan(tempo):
+              print(tempo)
+        else:
+          for note in current_group:
+            note.perform_features['local_tempo'] = None
+
       else:
         for note in current_group:
           note.perform_features['local_tempo'] = None
+    for note in self.note_groups[-1]:
+      note.perform_features['local_tempo'] = None
 
   def interpolate_tempo(self):
     def _interpolate_groups_in_region(note_groups):
       # interpolate first/last tempos
-      if note_groups[0].perform_features['local_tempo'] is None:
+      if note_groups[0][0].perform_features['local_tempo'] is None:
         for n in range(len(note_groups)):
           if note_groups[n][0].perform_features['local_tempo'] is not None:
+            print('point: {:d}'.format(n))
             local_tempo = note_groups[n][0].perform_features['local_tempo']
             for m in range(n - 1):
               fluctuation = (0.2 * random.random() + 0.9)
@@ -230,7 +256,7 @@ class Features(ScoreFeatures):
       interpolate_start = 0
       for n in range(len(note_groups)):
         if note_groups[n][0].perform_features['local_tempo'] is None:
-          groups_to_interpolate.append(note_groups)
+          groups_to_interpolate.append(note_groups[n])
         else:
           if groups_to_interpolate is not None:
             interpol_start_group = note_groups[interpolate_start]
@@ -238,18 +264,24 @@ class Features(ScoreFeatures):
 
             beat_interval = interpol_end_group[0].beat_position - interpol_start_group[0].beat_position
             for group in groups_to_interpolate:
-              interpol_ratio = (group[0].beat_position - interpol_start_group[0].beat_position) / beat_interval
-              interpol_tempo = interpol_ratio * interpol_end_group[0].perform_features['local_tempo'] + \
-                               (1 - interpol_ratio) * interpol_start_group[0].perform_features['local_tempo']
+              if interpol_start_group[0].perform_features['local_tempo'] is None:
+                # if first group's local_tempo == None
+                interpol_tempo = interpol_end_group[0].perform_features['local_tempo']
+              else:
+                # print(interpol_end_group[0].perform_features['local_tempo'])
+                interpol_ratio = (group[0].beat_position - interpol_start_group[0].beat_position) / beat_interval
+                interpol_tempo = interpol_ratio * interpol_end_group[0].perform_features['local_tempo'] + \
+                                 (1 - interpol_ratio) * interpol_start_group[0].perform_features['local_tempo']
               fluctuation = (0.2 * random.random() + 0.9)
               for note in group:
+
                 note.perform_features['local_tempo'] = interpol_tempo * fluctuation
           groups_to_interpolate = []
           interpolate_start = n
 
     # group tempo by abs tempo
-    abs_tempos = self.xml_sequence.meta.abs_tempos
-    tempo_region = [el.xml_position for el in abs_tempos]
+    abs_tempo = self.xml_sequence.meta.abs_tempo
+    tempo_region = [el.xml_position for el in abs_tempo]
     if tempo_region[0] != 0:
       tempo_region.insert(0, 0)
     group_xml_positions = [el[0].score_note.note_duration.xml_position for el in self.note_groups]
@@ -267,12 +299,16 @@ class Features(ScoreFeatures):
   def add_velocity(self):
     # TODO: how to interpolate velocity?
     moving_velocity = np.max([el.perform_note.velocity for el in self.note_groups[0]])
-    last_beat = self.note_groups[0].score_note.beat_poistion
+    last_beat = self.note_groups[0][0].beat_position
     for note_group in self.note_groups:
-      current_beat = note_group[0].score_note.beat_position
-      max_velocity = np.max([el.perform_note.velocity for el in note_group])
+      current_beat = note_group[0].beat_position
+      try:
+        max_velocity = np.max([el.perform_note.velocity for el in note_group if el.perform_note])
+      except:
+        max_velocity = moving_velocity
+
       moving_ratio = abs(4 - (current_beat - last_beat))/4
-      moving_velocity = moving_ratio * moving_velocity + (1-moving_ratio)* max_velocity
+      moving_velocity = moving_ratio * moving_velocity + (1 - moving_ratio) * max_velocity
       last_beat = current_beat
       for note in note_group:
         note.perform_features['moving_velocity'] = moving_velocity
@@ -284,8 +320,11 @@ class Features(ScoreFeatures):
   def add_articulation(self):
     for note_feature in self.note_features:
       expected_length = 60 * note_feature.note_length / note_feature.perform_features['local_tempo']
-      note_feature.perform_features['articulation'] = \
-        (note_feature.perform_note.end - note_feature.perform_note.start) / expected_length
+      if note_feature.perform_note:
+        note_feature.perform_features['articulation'] = \
+          (note_feature.perform_note.end - note_feature.perform_note.start) / expected_length
+      else:
+        note_feature.perform_features['articulation'] = None
 
 
 
@@ -345,20 +384,22 @@ def save_feature(features, save_path):
   feature_array = np.zeros((feature_length, 21))
 
   for step in range(feature_length):
-    feature_array[step, 0] = features.note_features.pitch
-    feature_array[step, 1] = features.note_features.note_length
-    feature_array[step, 2] = features.note_features.beat_location
-    feature_array[step, 3] = features.note_features.score_ioi
-    feature_array[step, 4:7] = features.note_features.dynamic
-    feature_array[step, 8:11] = features.note_features.notation
-    feature_array[step, 12:14] = features.note_features.tempo
+    print(features.note_features[step].__dict__)
+    feature_array[step, 0] = features.note_features[step].pitch[1]
+    feature_array[step, 1] = features.note_features[step].note_length
+    feature_array[step, 2] = features.note_features[step].beat_location
+    feature_array[step, 3] = features.note_features[step].score_ioi
+    feature_array[step, 4:8] = features.note_features[step].dynamic
+    feature_array[step, 8:12] = features.note_features[step].notation
+    feature_array[step, 12:15] = features.note_features[step].tempo
     # TODO: add boundary
 
-    feature_array[step, 16] = features.note_features.perform_features['base_tempo']
-    feature_array[step, 17] = features.note_features.perform_features['local_tempo'] / features.note_features.perform_features['base_tempo']
-    feature_array[step, 18] = features.note_features.perform_features['moving_velocity']
-    feature_array[step, 19] = features.note_features.perform_features['velocity']
-    feature_array[step, 20] = features.note_features.perform_features['articulation']
+    feature_array[step, 16] = features.note_features[step].perform_features['base_tempo']
+    feature_array[step, 17] = features.note_features[step].perform_features['local_tempo'] \
+                              / features.note_features[step].perform_features['base_tempo']
+    feature_array[step, 18] = features.note_features[step].perform_features['moving_velocity']
+    feature_array[step, 19] = features.note_features[step].perform_features['velocity']
+    feature_array[step, 20] = features.note_features[step].perform_features['articulation']
 
   np.save(save_path, feature_array)
 
@@ -386,3 +427,26 @@ def articaulation(xml_sequence, perform_pair):
 
 def pedal_features(xml_sequence, perform_pair, midis):
   pass
+
+if __name__ == '__main__':
+  # SCORE_FOLDER = '/dataset/chopin_cleaned'
+  SCORE_FOLDER = 'examples/ballade1'
+  OUT_FOLDER = 'dataset'
+
+  xml_files = midi_utils.utils.find_files_in_subdir(SCORE_FOLDER, '*.musicxml')
+
+  for xml_file in xml_files:
+    print(xml_file)
+    sub_folder, _ = midi_utils.utils.split_head_and_tail(xml_file)
+    midis = [os.path.join(sub_folder, el) for el in os.listdir(sub_folder)
+             if el.endswith('.mid')
+             and 'midi' not in el
+             and 'XP' not in el
+             and 'score' not in el]
+    xml_sequence = xml_data.XmlNoteSequence(xml_file)
+    for midi in midis:
+      print(midi)
+      perform_pair = matching.PerformPair(xml_sequence, midi)
+      features = Features(xml_sequence, perform_pair.score_pairs)
+      save_name = OUT_FOLDER + '/' + midi.replace(SCORE_FOLDER + '/', '').replace('/', '_').replace('.mid', '')
+      save_feature(features, save_name)

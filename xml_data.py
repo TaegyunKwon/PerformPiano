@@ -345,8 +345,8 @@ class XmlNotes(object):
           dur_seconds = duration_ratio(grc) * grc.state.seconds_per_quarter
           # dur_xml_time = duration_ratio(grc) * (grc.state.divisions / grc.state.time_signature.denominator * 4)
           grc.note_duration.time_position -= sec_to_following + dur_seconds
-          grc.note_duration.beat_position -= beat_to_following + grc.length_in_beat
-          grc.note_duration.beat_location -= beat_to_following + grc.length_in_beat
+          grc.beat_position -= beat_to_following + grc.length_in_beat
+          grc.beat_location -= beat_to_following + grc.length_in_beat
           # grc.note_duration.xml_position -= xml_time_to_following + dur_xml_time
           sec_to_following += dur_seconds
           beat_to_following += grc.length_in_beat

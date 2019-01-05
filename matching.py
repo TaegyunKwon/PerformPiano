@@ -22,6 +22,7 @@ class PerformPair(object):
       xml_sequence.save_to_midi(xml_sequence.notes, xml_midi_path)
 
     if not os.path.isfile(os.path.join(score_folder, 'score_fmt3x.txt')):
+      print('making matching files')
       try:
         match(xml_midi_path, perform_midi_path)
       except:
